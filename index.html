@@ -24,8 +24,8 @@
       '<div><div style="font-size:40px; margin-bottom:16px;">\u26d4</div>' +
       '<div style="font-size:18px; font-weight:700; margin-bottom:10px;">Aplikasi Tidak Didukung di Domain Ini</div>' +
       '<div style="font-size:14px; opacity:.75; max-width:360px; margin:0 auto;">' +
-      'Website ini adalah salinan tidak resmi. ' +
-      '<b>Byhas Studio</b>.</div></div></div>'
+      'Website ini adalah salinan tidak resmi. Aplikasi kasir Es Teh Manis Djawa yang sah hanya berjalan di ' +
+      '<b>tehmanisdjawa.github.io</b>.</div></div></div>'
     );
     document.close();
     throw new Error("Domain tidak diizinkan.");
@@ -3008,7 +3008,13 @@ function loadMenuRealtime(){
     MENU_MENTAH = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     gabungkanMenuDanStok();
   }, (err)=>{
-    el('menuArea').innerHTML = '<div class="empty">Gagal memuat menu. Cek koneksi/Firebase config.</div>';
+    console.error('Gagal load menu:', err);
+    const authUser = fbAuth && fbAuth.currentUser;
+    const infoAuth = authUser ? ('auth OK, uid: ' + authUser.uid) : 'BELUM AUTH (anonymous sign-in gagal/belum selesai)';
+    el('menuArea').innerHTML = '<div class="empty">Gagal memuat menu.<br>'
+      + '<span style="font-size:11px; opacity:.7;">Kode: ' + (err.code || 'unknown') + '<br>'
+      + 'Pesan: ' + (err.message || '-') + '<br>'
+      + 'Status: ' + infoAuth + '</span></div>';
   });
 
   if(SESI && SESI.outlet){

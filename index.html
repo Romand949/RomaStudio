@@ -4,7 +4,33 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <script>
-   })();
+/* =====================================================================
+   PROTEKSI DOMAIN
+   App ini HANYA boleh jalan dari domain resmi GitHub Pages-nya. Kalau file
+   ini di-copy dan di-upload/host ulang di domain lain, seluruh halaman
+   langsung diblokir sebelum sempat dirender -- ini lapisan pertama.
+   Lapisan kedua (yang sebenarnya menentukan) ada di Firestore Security
+   Rules, karena pengecekan di sisi HTML/JS ini bisa dilihat & dihapus
+   siapa saja yang buka "View Source" -- jangan andalkan ini sendirian.
+   ===================================================================== */
+(function(){
+  var DOMAIN_RESMI = ["tehmanisdjawa.github.io"];
+  var hostSekarang = location.hostname;
+  var diizinkan = DOMAIN_RESMI.indexOf(hostSekarang) !== -1 || hostSekarang === "localhost" || hostSekarang === "127.0.0.1";
+  if(!diizinkan){
+    document.write(
+      '<div style="min-height:100vh; display:flex; align-items:center; justify-content:center; ' +
+      'background:#0c1f16; color:#f3ede0; font-family:sans-serif; text-align:center; padding:32px;">' +
+      '<div><div style="font-size:40px; margin-bottom:16px;">\u26d4</div>' +
+      '<div style="font-size:18px; font-weight:700; margin-bottom:10px;">Aplikasi Tidak Didukung di Domain Ini</div>' +
+      '<div style="font-size:14px; opacity:.75; max-width:360px; margin:0 auto;">' +
+      'Website ini adalah salinan tidak resmi. Aplikasi kasir Es Teh Manis Djawa yang sah hanya berjalan di ' +
+      '<b>tehmanisdjawa.github.io</b>.</div></div></div>'
+    );
+    document.close();
+    throw new Error("Domain tidak diizinkan.");
+  }
+})();
 </script>
 <title>Kasir — Es Teh Manis Djawa</title>
 <style>

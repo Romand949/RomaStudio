@@ -5,13 +5,6 @@
 (function(){
 'use strict';
 
-if (typeof THREE === 'undefined') {
-  console.error('Forge Studio: THREE is not defined — three.js failed to load before app.js. Check your internet connection / CDN access.');
-  const el = document.getElementById('viewport-wrap');
-  if (el) el.innerHTML = '<div style="color:#ff5c5c;padding:20px;font-family:sans-serif;">Three.js gagal dimuat. Cek koneksi internet lalu refresh.</div>';
-  return;
-}
-
 /* ---------------- UTIL ---------------- */
 const $ = sel => document.querySelector(sel);
 const $$ = sel => Array.from(document.querySelectorAll(sel));
@@ -42,7 +35,9 @@ let dirty = false;
 
 function markDirty(){ dirty = true; updateProjectTag(); }
 function updateProjectTag(){
-  $('#projectNameTag').textContent = projectName + (dirty ? ' *' : '');
+  const txt = projectName + (dirty ? ' *' : '');
+  const a = $('#projectNameTag'); if(a) a.textContent = txt;
+  const b = $('#ribbon-toolbar-tag'); if(b) b.textContent = txt;
 }
 
 function newNode(type, name, overrides){
@@ -451,18 +446,7 @@ $$('#hierarchy-toolbar .add-btn').forEach(btn=>{
   btn.onclick = ()=> addObject(btn.dataset.add);
 });
 function addObject(type, parentOverride){
-  const sel = getSingleSelected();
-  let parent;
-  if(parentOverride) parent = parentOverride;
-  else if(type==='Script' && sel && sel.type!=='Script'){
-    // A script attaches to the currently selected object so `object` inside
-    // it resolves correctly (see makeObjectAPI).
-    parent = sel;
-  } else if(sel && ['Folder','World'].includes(sel.type)){
-    parent = sel;
-  } else {
-    parent = sceneRoot;
-  }
+  const parent = parentOverride || (getSingleSelected() && ['Folder','World'].includes(getSingleSelected().type) ? getSingleSelected() : sceneRoot);
   let overrides = {};
   if(type==='Part') overrides = { position:{x:0,y:1,z:0} };
   if(type==='Light') overrides = { position:{x:0,y:5,z:0}, color:'#ffe58a' };
@@ -750,32 +734,11 @@ function updateGizmoDrag(e, dx, dy){
   const node = gizmoDragStart.node;
   const totalDx = e.clientX - gizmoDragStart.mouseX;
   const totalDy = e.clientY - gizmoDragStart.mouseY;
+  const sensitivity = 0.03;
   const axis = gizmoAxisHit;
-
-  // Project the world-space axis onto screen space so dragging the mouse
-  // "along" the arrow (in whatever direction it points on screen) always
-  // moves/rotates/scales the object along that axis — regardless of camera angle.
-  const originWorld = new THREE.Vector3(gizmoDragStart.pos.x, gizmoDragStart.pos.y, gizmoDragStart.pos.z);
-  const axisWorld = new THREE.Vector3(axis.x, axis.y, axis.z);
-  const tipWorld = originWorld.clone().addScaledVector(axisWorld, 1);
-  const rect = renderer.domElement.getBoundingClientRect();
-  const toScreen = (v)=>{
-    const p = v.clone().project(camera);
-    return { x: (p.x*0.5+0.5)*rect.width, y: (-p.y*0.5+0.5)*rect.height };
-  };
-  const sOrigin = toScreen(originWorld);
-  const sTip = toScreen(tipWorld);
-  let screenDirX = sTip.x - sOrigin.x, screenDirY = sTip.y - sOrigin.y;
-  const screenLen = Math.hypot(screenDirX, screenDirY) || 1;
-  screenDirX /= screenLen; screenDirY /= screenLen;
-  // How far the mouse has moved along that screen direction, in pixels.
-  const screenDelta = totalDx*screenDirX + totalDy*screenDirY;
-
   if(currentTool==='translate'){
-    // pixels -> world units, scaled by distance from camera so it feels consistent when zoomed
-    const dist = camera.position.distanceTo(originWorld);
-    const worldPerPixel = dist * 0.0022;
-    const amount = screenDelta * worldPerPixel;
+    const delta = -totalDy*sensitivity + totalDx*sensitivity*(axis.x||axis.z?1:0)*0;
+    const amount = (Math.abs(dx)>Math.abs(dy)? totalDx : -totalDy) * sensitivity;
     node.position.x = gizmoDragStart.pos.x + axis.x*amount;
     node.position.y = gizmoDragStart.pos.y + axis.y*amount;
     node.position.z = gizmoDragStart.pos.z + axis.z*amount;
@@ -785,17 +748,12 @@ function updateGizmoDrag(e, dx, dy){
       node.position.z = Math.round(node.position.z);
     }
   } else if(currentTool==='rotate'){
-    const amount = screenDelta * 0.6;
+    const amount = (totalDx - totalDy) * 0.6;
     node.rotation.x = gizmoDragStart.rot.x + axis.x*amount;
     node.rotation.y = gizmoDragStart.rot.y + axis.y*amount;
     node.rotation.z = gizmoDragStart.rot.z + axis.z*amount;
-    if(snapEnabled){
-      node.rotation.x = Math.round(node.rotation.x/15)*15;
-      node.rotation.y = Math.round(node.rotation.y/15)*15;
-      node.rotation.z = Math.round(node.rotation.z/15)*15;
-    }
   } else if(currentTool==='scale'){
-    const amount = screenDelta * 0.01;
+    const amount = (totalDx - totalDy) * 0.01;
     node.scale.x = Math.max(0.05, gizmoDragStart.scale.x + axis.x*amount);
     node.scale.y = Math.max(0.05, gizmoDragStart.scale.y + axis.y*amount);
     node.scale.z = Math.max(0.05, gizmoDragStart.scale.z + axis.z*amount);
@@ -812,12 +770,14 @@ let snapEnabled = false;
 $('#snapToggle').onchange = (e)=>{ snapEnabled = e.target.checked; };
 
 /* Tool buttons */
+const TOOL_LABELS = {select:'Select', translate:'Move', rotate:'Rotate', scale:'Scale'};
 function setTool(tool){
   currentTool = tool;
   $$('#toolSelect,#toolMove,#toolRotate,#toolScale').forEach(b=>b.classList.remove('active'));
   ({select:'#toolSelect',translate:'#toolMove',rotate:'#toolRotate',scale:'#toolScale'})[tool] &&
     $(({select:'#toolSelect',translate:'#toolMove',rotate:'#toolRotate',scale:'#toolScale'})[tool]).classList.add('active');
   updateGizmoPosition();
+  const lbl = $('#sbToolName'); if(lbl) lbl.textContent = TOOL_LABELS[tool] || tool;
 }
 $('#toolSelect').onclick = ()=>setTool('select');
 $('#toolMove').onclick = ()=>setTool('translate');
@@ -925,19 +885,7 @@ function runScript(scriptId, node){
   try{
     const api = makeObjectAPI(node);
     const printFn = (...args)=>logToConsole(args.map(a=>typeof a==='object'?JSON.stringify(a):String(a)).join(' '));
-    // strip both full-line and trailing "-- comment" style comments (but never inside quoted strings)
-    const stripped = scr.code.split('\n').map(line=>{
-      let inStr = null, out = '';
-      for(let i=0;i<line.length;i++){
-        const ch = line[i];
-        if(inStr){ out+=ch; if(ch===inStr && line[i-1]!=='\\') inStr=null; continue; }
-        if(ch==='"' || ch==="'"){ inStr=ch; out+=ch; continue; }
-        if(ch==='-' && line[i+1]==='-'){ break; }
-        out+=ch;
-      }
-      return out;
-    }).join('\n');
-    const fn = new Function('object','print', stripped);
+    const fn = new Function('object','print', scr.code.replace(/^--.*$/gm,'') /* strip lua-style comments lightly */);
     fn(api, printFn);
     logToConsole('✓ Script selesai dijalankan', 'ok');
   }catch(err){
@@ -945,16 +893,10 @@ function runScript(scriptId, node){
   }
 }
 function makeObjectAPI(node){
-  // A Script node lives as a CHILD of the object it controls (like Roblox's
-  // LocalScript inside a Part). So `object` inside the script must refer to
-  // the Script node's PARENT — not some unrelated lookup — and if the parent
-  // is the World root (script placed at scene top level) there's no valid
-  // target object to control.
-  const parent = node ? nodesById.get(node.parentId) : null;
-  const target = (parent && parent.type!=='World') ? parent : null;
+  const parent = nodesById.get(node && node.parentId);
+  const target = parent && parent.type!=='World' ? parent : (parent||sceneRoot);
   const handlers = { click:[], touch:[] };
-  scriptHandlers.set(target ? target.id : (node?node.id:'global'), handlers);
-  if(!target) logToConsole('⚠ Script "'+(node?node.name:'?')+'" tidak berada di dalam objek — pindahkan Script ini menjadi child dari Part/Model/NPC agar "object" merujuk ke objek tersebut.', 'error');
+  scriptHandlers.set(node?node.id:'global', handlers);
   return {
     get Position(){ return target?{...target.position}:null; },
     set Position(v){ if(target){ Object.assign(target.position, v); refreshThreeObject(target); } },
@@ -1078,6 +1020,7 @@ let playState = null;
 function enterPlayMode(){
   playMode = true;
   document.body.classList.add('play-active');
+  syncPlayButtonsVisibility();
   selectOnly(null);
   // snapshot for restore
   playState = { camPos: camera.position.clone(), orbit:{...orbit, target:orbit.target.clone()} };
@@ -1091,16 +1034,6 @@ function enterPlayMode(){
   orbit.target = new THREE.Vector3(playRuntime.player.pos.x, playRuntime.player.pos.y, playRuntime.player.pos.z);
   orbit.radius = 10;
   updateCameraFromOrbit();
-
-  // Visible player capsule so the user can actually see their character.
-  const playerMesh = new THREE.Mesh(
-    new THREE.CapsuleGeometry ? new THREE.CapsuleGeometry(0.4, 1.0, 4, 8) : new THREE.BoxGeometry(0.8,1.8,0.8),
-    new THREE.MeshStandardMaterial({ color:0x5b8cff, roughness:0.6 })
-  );
-  playerMesh.castShadow = true;
-  scene.add(playerMesh);
-  playRuntime.mesh = playerMesh;
-
   logToConsole('=== PLAY MODE dimulai ===','info');
   // run all scripts once (bind handlers)
   scriptHandlers.clear();
@@ -1114,8 +1047,7 @@ function enterPlayMode(){
 function exitPlayMode(){
   playMode = false;
   document.body.classList.remove('play-active');
-  if(playRuntime && playRuntime.mesh){ scene.remove(playRuntime.mesh); playRuntime.mesh = null; }
-  playRuntime = null;
+  syncPlayButtonsVisibility();
   if(playState){
     orbit.theta = playState.orbit.theta; orbit.phi = playState.orbit.phi;
     orbit.target = playState.orbit.target; orbit.radius = playState.orbit.radius;
@@ -1145,22 +1077,9 @@ function stepPlayMode(dt){
   if(keysDown.has('a')||keysDown.has('arrowleft')) mx -= 1;
   if(keysDown.has('d')||keysDown.has('arrowright')) mx += 1;
   const len = Math.hypot(mx,mz) || 1;
-  mx/=len; mz/=len;
   const p = playRuntime.player;
-
-  if(mx||mz){
-    // Move relative to camera facing (yaw only) so WASD always feels like
-    // forward/back/left/right from the player's point of view, regardless
-    // of how the camera has been orbited.
-    const theta = orbit.theta;
-    const fwdX = Math.sin(theta), fwdZ = Math.cos(theta);
-    const rightX = Math.sin(theta+Math.PI/2), rightZ = Math.cos(theta+Math.PI/2);
-    const moveX = (fwdX*-mz + rightX*mx);
-    const moveZ = (fwdZ*-mz + rightZ*mx);
-    const mlen = Math.hypot(moveX,moveZ) || 1;
-    p.pos.x += (moveX/mlen)*speed*dt;
-    p.pos.z += (moveZ/mlen)*speed*dt;
-  }
+  p.pos.x += (mx/len)*speed*dt;
+  p.pos.z += (mz/len)*speed*dt;
 
   // simple gravity + ground collision against anchored parts with collision on
   p.vy -= playRuntime.gravity*dt;
@@ -1181,7 +1100,6 @@ function stepPlayMode(dt){
 
   orbit.target.set(p.pos.x, p.pos.y, p.pos.z);
   updateCameraFromOrbit();
-  if(playRuntime.mesh) playRuntime.mesh.position.set(p.pos.x, p.pos.y - 0.9, p.pos.z);
 
   // touch detection (very simplified) -> fire OnTouch when player within part bounds
   nodesById.forEach(node=>{
@@ -1362,6 +1280,63 @@ window.addEventListener('keydown', (e)=>{
   else if(e.key==='F5'){ e.preventDefault(); playMode?exitPlayMode():enterPlayMode(); }
   else if(e.key==='Escape'){ if(playMode) exitPlayMode(); }
 });
+
+/* ---------------- RIBBON WIRING ---------------- */
+$$('.ribbon-tab').forEach(tab=>{
+  tab.onclick = ()=>{
+    $$('.ribbon-tab').forEach(t=>t.classList.remove('active'));
+    $$('.ribbon-page').forEach(p=>p.classList.remove('active'));
+    tab.classList.add('active');
+    $(`.ribbon-page[data-page="${tab.dataset.page}"]`).classList.add('active');
+  };
+});
+
+// Mirror all Play/Stop buttons (toolbar had multiple copies across ribbon pages)
+function bindPlayStopButtons(){
+  ['#playBtnR','#playBtnR2'].forEach(sel=>{ const b=$(sel); if(b) b.onclick = enterPlayMode; });
+  ['#stopBtnR','#stopBtnR2'].forEach(sel=>{ const b=$(sel); if(b) b.onclick = exitPlayMode; });
+}
+const _origEnterPlayMode = enterPlayMode;
+const _origExitPlayMode = exitPlayMode;
+function syncPlayButtonsVisibility(){
+  const show = playMode;
+  ['#stopBtnR','#stopBtnR2'].forEach(sel=>{ const b=$(sel); if(b) b.style.display = show?'flex':'none'; });
+  ['#playBtnR','#playBtnR2'].forEach(sel=>{ const b=$(sel); if(b) b.style.display = show?'none':'flex'; });
+}
+
+// Insert dropdown (Home tab "Place: ___" + Insert button)
+$('#btnInsertPlace') && ($('#btnInsertPlace').onclick = ()=>{
+  const type = $('#insertPlaceSelect').value;
+  addObject(type);
+});
+
+// Duplicate / Delete / Anchor / Material quick actions in ribbon
+$('#btnDuplicateR') && ($('#btnDuplicateR').onclick = ()=>{ const n=getSingleSelected(); if(n) duplicateNode(n); else toast('Pilih objek dulu','err'); });
+$('#btnDeleteR') && ($('#btnDeleteR').onclick = ()=>{ if(selectedIds.size) deleteSelected(); else toast('Pilih objek dulu','err'); });
+$('#btnAnchorToggle') && ($('#btnAnchorToggle').onclick = ()=>{
+  const n = getSingleSelected();
+  if(!n){ toast('Pilih objek dulu','err'); return; }
+  n.anchored = !n.anchored; refreshProperties(); markDirty(); pushHistory('Toggle Anchor');
+  toast('Anchored: '+n.anchored);
+});
+const MATERIAL_CYCLE = ['Plastic','Metal','Wood','Glass','Neon'];
+$('#btnMaterialQuick') && ($('#btnMaterialQuick').onclick = ()=>{
+  const n = getSingleSelected();
+  if(!n){ toast('Pilih objek dulu','err'); return; }
+  const idx = MATERIAL_CYCLE.indexOf(n.material);
+  n.material = MATERIAL_CYCLE[(idx+1)%MATERIAL_CYCLE.length];
+  refreshThreeObject(n); refreshProperties(); markDirty();
+  toast('Material: '+n.material);
+});
+
+// Run Script (Test tab)
+$('#btnRunScriptR') && ($('#btnRunScriptR').onclick = ()=>{ $('#btnRunScript').click(); });
+
+// View tab toggles
+$('#viewToggleAssets') && ($('#viewToggleAssets').onclick = ()=>switchCenterTab('assets'));
+$('#viewToggleScript') && ($('#viewToggleScript').onclick = ()=>switchCenterTab('script'));
+
+bindPlayStopButtons();
 
 /* ---------------- INIT ---------------- */
 function boot(){

@@ -1137,8 +1137,7 @@ viewportWrap.addEventListener('click', (e)=>{
   }
 });
 
-$('#playBtn').onclick = enterPlayMode;
-$('#stopBtn').onclick = exitPlayMode;
+bindPlayStopButtons();
 
 /* ---------------- HISTORY (Undo/Redo) ---------------- */
 let history = [];

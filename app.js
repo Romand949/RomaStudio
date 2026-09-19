@@ -54,6 +54,7 @@ function newNode(type, name, overrides){
     collision:true,
     visible:true,
     scriptId:null,
+    assetKind:null, // e.g. 'tree','house','rock' - visual shape variant for Model type
     children:[],
     parentId:null
   }, overrides||{});
@@ -251,11 +252,14 @@ function materialForNode(node){
 
 function buildThreeForNode(node){
   let obj;
-  if(node.type==='Part' || node.type==='Spawn' || node.type==='Model' || node.type==='NPC'){
-    const geo = new THREE.BoxGeometry(node.size.x, node.size.y, node.size.z);
+  if(node.type==='Model' && node.assetKind){
+    obj = buildCompoundShape(node);
+  } else if(node.type==='Part' || node.type==='Spawn' || node.type==='Model' || node.type==='NPC'){
+    let geo;
+    if(node.type==='NPC') geo = new THREE.CapsuleGeometry(Math.max(0.2,node.size.x*0.4), Math.max(0.1,node.size.y*0.8), 4, 8);
+    else geo = new THREE.BoxGeometry(node.size.x, node.size.y, node.size.z);
     const mesh = new THREE.Mesh(geo, materialForNode(node));
     mesh.castShadow = true; mesh.receiveShadow = true;
-    if(node.type==='NPC'){ mesh.geometry = new THREE.CapsuleGeometry ? new THREE.CapsuleGeometry(node.size.x*0.4, node.size.y*0.8, 4, 8) : geo; }
     obj = mesh;
   } else if(node.type==='Light'){
     const light = new THREE.PointLight(new THREE.Color(node.color||'#ffffff'), 1.2, 40);
@@ -278,11 +282,67 @@ function buildThreeForNode(node){
   return obj;
 }
 
+/* Compound placeholder shapes for Model assets (tree, house, rock, etc.)
+   Built from multiple primitives so they read as real objects instead of plain boxes. */
+function buildCompoundShape(node){
+  const group = new THREE.Group();
+  const baseColor = new THREE.Color(node.color||'#5b8cff');
+  const mkMat = (colorHex, opts)=> new THREE.MeshStandardMaterial(Object.assign({
+    color: colorHex, roughness:0.85, metalness:0
+  }, opts||{}));
+  const sx=node.size.x, sy=node.size.y, sz=node.size.z;
+
+  function addMesh(geo, mat, pos, rot){
+    const m = new THREE.Mesh(geo, mat);
+    m.castShadow = true; m.receiveShadow = true;
+    if(pos) m.position.set(pos[0],pos[1],pos[2]);
+    if(rot) m.rotation.set(rot[0],rot[1],rot[2]);
+    group.add(m);
+    return m;
+  }
+
+  switch(node.assetKind){
+    case 'tree': {
+      const trunkH = sy*0.55, trunkR = sx*0.12;
+      addMesh(new THREE.CylinderGeometry(trunkR*0.8, trunkR, trunkH, 8), mkMat('#7a5230'), [0, trunkH/2, 0]);
+      const foliageMat = mkMat(node.color||'#4caf50');
+      addMesh(new THREE.SphereGeometry(sx*0.45, 10, 8), foliageMat, [0, trunkH + sy*0.28, 0]);
+      addMesh(new THREE.SphereGeometry(sx*0.32, 10, 8), foliageMat, [sx*0.22, trunkH + sy*0.12, sz*0.1]);
+      addMesh(new THREE.SphereGeometry(sx*0.3, 10, 8), foliageMat, [-sx*0.2, trunkH + sy*0.08, -sz*0.12]);
+      break;
+    }
+    case 'house': {
+      const wallH = sy*0.6;
+      addMesh(new THREE.BoxGeometry(sx, wallH, sz), mkMat(node.color||'#d8c9a3'), [0, wallH/2, 0]);
+      const roofMat = mkMat('#8b3a3a');
+      const roof = addMesh(new THREE.ConeGeometry(sx*0.78, sy*0.42, 4), roofMat, [0, wallH + sy*0.2, 0]);
+      roof.rotation.y = Math.PI/4;
+      addMesh(new THREE.BoxGeometry(sx*0.18, wallH*0.5, 0.05), mkMat('#4a3320'), [0, wallH*0.28, sz/2+0.03]);
+      break;
+    }
+    case 'rock': {
+      const rockMat = mkMat(node.color||'#8a8f98', {roughness:1, flatShading:true});
+      addMesh(new THREE.DodecahedronGeometry(sx*0.5, 0), rockMat, [0, sy*0.28, 0]);
+      addMesh(new THREE.DodecahedronGeometry(sx*0.3, 0), rockMat, [sx*0.28, sy*0.12, sz*0.15]);
+      break;
+    }
+    case 'character': {
+      const skin = mkMat(node.color||'#ffb454');
+      addMesh(new THREE.CapsuleGeometry(sx*0.28, sy*0.5, 4, 8), skin, [0, sy*0.42, 0]);
+      addMesh(new THREE.SphereGeometry(sx*0.22, 10, 8), skin, [0, sy*0.82, 0]);
+      break;
+    }
+    default: {
+      addMesh(new THREE.BoxGeometry(sx, sy, sz), mkMat(node.color||'#5b8cff'), [0, sy/2, 0]);
+    }
+  }
+  return group;
+}
+
 function applyTransform(obj, node){
   obj.position.set(node.position.x, node.position.y, node.position.z);
   obj.rotation.set(THREE.MathUtils.degToRad(node.rotation.x), THREE.MathUtils.degToRad(node.rotation.y), THREE.MathUtils.degToRad(node.rotation.z));
-  if(obj.isMesh){
-    // scale represents multiplier on top of size baked into geometry
+  if(obj.isMesh || (node.type==='Model' && node.assetKind)){
     obj.scale.set(node.scale.x, node.scale.y, node.scale.z);
   }
 }
@@ -305,6 +365,15 @@ function rebuildScene3D(){
 function refreshThreeObject(node){
   const obj = threeObjects.get(node.id);
   if(!obj) return;
+  if(node.type==='Model' && node.assetKind){
+    // compound shapes are rebuilt wholesale since their geometry is multi-part
+    const newObj = buildThreeForNode(node);
+    scene.remove(obj);
+    scene.add(newObj);
+    threeObjects.set(node.id, newObj);
+    updateGizmoPosition();
+    return;
+  }
   applyTransform(obj, node);
   obj.visible = node.visible!==false;
   if(obj.isMesh){
@@ -446,7 +515,7 @@ function reparentNode(childId, newParentId){
 $$('#hierarchy-toolbar .add-btn').forEach(btn=>{
   btn.onclick = ()=> addObject(btn.dataset.add);
 });
-function addObject(type, parentOverride){
+function addObject(type, parentOverride, extraOverrides){
   if(!sceneRoot){ toast('Project belum siap, coba lagi sesaat','err'); return; }
   const parent = parentOverride || (getSingleSelected() && ['Folder','World'].includes(getSingleSelected().type) ? getSingleSelected() : sceneRoot);
   let overrides = {};
@@ -456,6 +525,8 @@ function addObject(type, parentOverride){
   if(type==='Spawn') overrides = { size:{x:2,y:0.2,z:2}, color:'#3ddc84', position:{x:0,y:0.1,z:0} };
   if(type==='NPC') overrides = { size:{x:1,y:2,z:1}, color:'#ffb454', position:{x:2,y:1,z:0} };
   if(type==='Model') overrides = { position:{x:0,y:1,z:0}, color:'#a06bff' };
+  if(extraOverrides) overrides = Object.assign({}, overrides, extraOverrides);
+  if(extraOverrides && extraOverrides.assetKind) overrides.position = { x:0, y:0, z:0 };
 
   if(type==='Script'){
     const scr = { id: uid(), name:'Script'+Object.keys(scripts).length, code: defaultScriptTemplate() };
@@ -575,12 +646,16 @@ function refreshProperties(){
   }
 
   if(['Part','Model','Spawn','NPC'].includes(node.type)){
-    propertiesEl.appendChild(makeGroup('Ukuran & Tampilan', [
+    const sizeRows = [
       ['Size', vec3Field(node.size, ()=>{ refreshThreeObject(node); markDirty(); }, 0.1)],
       ['Color', colorField(node.color, v=>{ node.color=v; refreshThreeObject(node); markDirty(); })],
       ['Material', selectField(node.material, ['Plastic','Metal','Wood','Glass','Neon'], v=>{ node.material=v; refreshThreeObject(node); markDirty(); })],
       ['Transparency', rangeField(node.transparency, 0,1,0.05, v=>{ node.transparency=v; refreshThreeObject(node); markDirty(); })],
-    ]));
+    ];
+    if(node.type==='Model'){
+      sizeRows.splice(1, 0, ['Shape', selectField(node.assetKind||'box', ['box','tree','house','rock'], v=>{ node.assetKind = v==='box'?null:v; refreshThreeObject(node); markDirty(); })]);
+    }
+    propertiesEl.appendChild(makeGroup('Ukuran & Tampilan', sizeRows));
     propertiesEl.appendChild(makeGroup('Fisika', [
       ['Anchored', toggleField(node.anchored, v=>{ node.anchored=v; markDirty(); })],
       ['Collision', toggleField(node.collision, v=>{ node.collision=v; markDirty(); })],
@@ -967,9 +1042,9 @@ const ASSETS = [
   {name:'Ramp Block', cat:'Blocks', icon:'🔺', type:'Part'},
   {name:'Cylinder Block', cat:'Blocks', icon:'🛢️', type:'Part'},
   {name:'Sphere Block', cat:'Blocks', icon:'⚪', type:'Part'},
-  {name:'Tree Model', cat:'Models', icon:'🌳', type:'Model'},
-  {name:'House Model', cat:'Models', icon:'🏠', type:'Model'},
-  {name:'Rock Model', cat:'Models', icon:'🪨', type:'Model'},
+  {name:'Tree Model', cat:'Models', icon:'🌳', type:'Model', assetKind:'tree', color:'#4caf50', size:{x:2,y:4,z:2}},
+  {name:'House Model', cat:'Models', icon:'🏠', type:'Model', assetKind:'house', color:'#d8c9a3', size:{x:4,y:3,z:4}},
+  {name:'Rock Model', cat:'Models', icon:'🪨', type:'Model', assetKind:'rock', color:'#8a8f98', size:{x:2,y:1.4,z:2}},
   {name:'Plastic Mat', cat:'Materials', icon:'🎨', type:'material', material:'Plastic'},
   {name:'Metal Mat', cat:'Materials', icon:'⚙️', type:'material', material:'Metal'},
   {name:'Wood Mat', cat:'Materials', icon:'🪵', type:'material', material:'Wood'},
@@ -980,9 +1055,9 @@ const ASSETS = [
   {name:'Footstep Sfx', cat:'Sounds', icon:'🔊', type:'sound'},
   {name:'Jump Sfx', cat:'Sounds', icon:'🔊', type:'sound'},
   {name:'Ambient Music', cat:'Sounds', icon:'🎵', type:'sound'},
-  {name:'Hero Character', cat:'Characters', icon:'🧍', type:'NPC'},
-  {name:'Enemy Character', cat:'Characters', icon:'👹', type:'NPC'},
-  {name:'Villager', cat:'Characters', icon:'🧑', type:'NPC'},
+  {name:'Hero Character', cat:'Characters', icon:'🧍', type:'NPC', assetKind:'character', color:'#5b8cff', size:{x:1,y:2,z:1}},
+  {name:'Enemy Character', cat:'Characters', icon:'👹', type:'NPC', assetKind:'character', color:'#d94b4b', size:{x:1,y:2,z:1}},
+  {name:'Villager', cat:'Characters', icon:'🧑', type:'NPC', assetKind:'character', color:'#ffb454', size:{x:1,y:2,z:1}},
   {name:'Explosion FX', cat:'Effects', icon:'💥', type:'effect'},
   {name:'Sparkle FX', cat:'Effects', icon:'✨', type:'effect'},
   {name:'Smoke FX', cat:'Effects', icon:'💨', type:'effect'},
@@ -1000,7 +1075,11 @@ function rebuildAssetGrid(){
 }
 function placeAsset(a){
   if(a.type==='Part' || a.type==='Model' || a.type==='NPC'){
-    addObject(a.type);
+    const overrides = {};
+    if(a.assetKind) overrides.assetKind = a.assetKind;
+    if(a.color) overrides.color = a.color;
+    if(a.size) overrides.size = {...a.size};
+    addObject(a.type, null, overrides);
     const node = getSingleSelected();
     if(node) node.name = a.name;
     rebuildHierarchy();

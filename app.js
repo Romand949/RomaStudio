@@ -62,6 +62,7 @@ function newNode(type, name, overrides){
 }
 
 function addChild(parent, child){
+  if(!parent){ console.error('addChild: parent is null/undefined for child', child); return; }
   child.parentId = parent.id;
   parent.children.push(child);
 }
@@ -446,6 +447,7 @@ $$('#hierarchy-toolbar .add-btn').forEach(btn=>{
   btn.onclick = ()=> addObject(btn.dataset.add);
 });
 function addObject(type, parentOverride){
+  if(!sceneRoot){ toast('Project belum siap, coba lagi sesaat','err'); return; }
   const parent = parentOverride || (getSingleSelected() && ['Folder','World'].includes(getSingleSelected().type) ? getSingleSelected() : sceneRoot);
   let overrides = {};
   if(type==='Part') overrides = { position:{x:0,y:1,z:0} };
